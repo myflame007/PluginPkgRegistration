@@ -50,7 +50,7 @@ public static class DataverseAuth
                 <h1>Authentifizierung erfolgreich!</h1>
                 <p>Du bist jetzt verbunden.<br/>Das Plugin-Deployment läuft im Terminal weiter.</p>
                 <p class="hint">Du kannst diesen Tab jetzt schließen.</p>
-                <p class="coffee">☕ <a href="https://buymeacoffee.com/community.dataverse" target="_blank">Buy me a coffee</a></p>
+
             </div>
         </body>
         </html>

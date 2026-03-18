@@ -272,8 +272,6 @@ async Task<int> RunRegister(string[] args)
     if (!string.IsNullOrEmpty(solutionName))
         Console.WriteLine($"  Solution:     {solutionName}");
     Console.WriteLine();
-    Console.WriteLine("  ☕ If this tool saved you time:");
-    Console.WriteLine("     https://buymeacoffee.com/community.dataverse");
     Console.WriteLine();
     return 0;
 }
