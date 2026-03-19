@@ -272,6 +272,8 @@ async Task<int> RunRegister(string[] args)
     if (!string.IsNullOrEmpty(solutionName))
         Console.WriteLine($"  Solution:     {solutionName}");
     Console.WriteLine();
+    Console.WriteLine("  ☕ Like this tool? Buy me a coffee:");
+    Console.WriteLine("     https://buymeacoffee.com/rstickler.dev");
     Console.WriteLine();
     return 0;
 }
