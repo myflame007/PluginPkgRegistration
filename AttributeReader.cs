@@ -65,9 +65,8 @@ public static class AttributeReader
         }
         else if (args.Count == 1)
         {
-            // Custom API constructor: (message)
-            message = args[0].Value?.ToString() ?? "";
-            stepName = message;
+            // Custom API constructor: (message) — handled by ReadCustomApisFromAssembly()
+            return null;
         }
         else if (args.Count == 8)
         {
@@ -146,6 +145,158 @@ public static class AttributeReader
 
         return step;
     }
+
+    // ═════════════════════════════════════════════════════════════════════
+    //  Custom API Reading
+    // ═════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Reads Custom API definitions from the assembly.
+    /// Looks for classes with CrmPluginRegistrationAttribute (1-arg constructor)
+    /// plus CustomApiDefinitionAttribute and optional parameter attributes.
+    /// </summary>
+    public static List<CustomApiInfo> ReadCustomApisFromAssembly(string assemblyPath, Action<string>? log = null)
+    {
+        var apis = new List<CustomApiInfo>();
+        var dir = Path.GetDirectoryName(Path.GetFullPath(assemblyPath))!;
+
+        var runtimeDir = System.Runtime.InteropServices.RuntimeEnvironment.GetRuntimeDirectory();
+        var resolver = new PathAssemblyResolver(
+            Directory.GetFiles(dir, "*.dll")
+                .Concat(Directory.GetFiles(runtimeDir, "*.dll")));
+
+        using var mlc = new MetadataLoadContext(resolver);
+        var assembly = mlc.LoadFromAssemblyPath(Path.GetFullPath(assemblyPath));
+
+        foreach (var type in assembly.GetTypes())
+        {
+            var allAttrs = type.GetCustomAttributesData();
+
+            // Find 1-arg CrmPluginRegistration (Custom API marker)
+            var crmAttr = allAttrs
+                .Where(a => a.AttributeType.Name == "CrmPluginRegistrationAttribute"
+                         && a.ConstructorArguments.Count == 1)
+                .FirstOrDefault();
+
+            if (crmAttr == null) continue;
+
+            var messageName = crmAttr.ConstructorArguments[0].Value?.ToString() ?? "";
+            var typeName = type.FullName ?? type.Name;
+
+            // Look for CustomApiDefinitionAttribute
+            var defAttr = allAttrs
+                .FirstOrDefault(a => a.AttributeType.Name == "CustomApiDefinitionAttribute");
+
+            if (defAttr == null)
+            {
+                log?.Invoke($"  WARN: '{typeName}' has Custom API registration but no [CustomApiDefinition]. Using defaults.");
+            }
+
+            var api = new CustomApiInfo
+            {
+                UniqueName = messageName,
+                PluginTypeName = typeName
+            };
+
+            // Parse definition attribute
+            if (defAttr != null)
+                ParseCustomApiDefinition(api, defAttr);
+
+            // Parse request parameters
+            foreach (var paramAttr in allAttrs.Where(a => a.AttributeType.Name == "CustomApiRequestParameterAttribute"))
+            {
+                var param = ParseCustomApiParameter(paramAttr);
+                if (param != null)
+                    api.RequestParameters.Add(param);
+            }
+
+            // Parse response properties
+            foreach (var propAttr in allAttrs.Where(a => a.AttributeType.Name == "CustomApiResponsePropertyAttribute"))
+            {
+                var prop = ParseCustomApiParameter(propAttr);
+                if (prop != null)
+                {
+                    prop.IsRequired = false; // Response properties are never "required"
+                    api.ResponseProperties.Add(prop);
+                }
+            }
+
+            apis.Add(api);
+        }
+
+        return apis;
+    }
+
+    private static void ParseCustomApiDefinition(CustomApiInfo api, CustomAttributeData attr)
+    {
+        foreach (var named in attr.NamedArguments)
+        {
+            switch (named.MemberName)
+            {
+                case "DisplayName":
+                    api.DisplayName = named.TypedValue.Value?.ToString() ?? "";
+                    break;
+                case "Description":
+                    api.Description = named.TypedValue.Value?.ToString() ?? "";
+                    break;
+                case "BindingType":
+                    api.BindingType = Convert.ToInt32(named.TypedValue.Value);
+                    break;
+                case "BoundEntity":
+                    api.BoundEntity = named.TypedValue.Value?.ToString();
+                    break;
+                case "IsFunction":
+                    api.IsFunction = Convert.ToBoolean(named.TypedValue.Value);
+                    break;
+                case "IsPrivate":
+                    api.IsPrivate = Convert.ToBoolean(named.TypedValue.Value);
+                    break;
+                case "AllowedProcessingStepType":
+                    api.AllowedProcessingStepType = Convert.ToInt32(named.TypedValue.Value);
+                    break;
+                case "ExecutePrivilegeName":
+                    api.ExecutePrivilegeName = named.TypedValue.Value?.ToString();
+                    break;
+            }
+        }
+    }
+
+    private static CustomApiParameterInfo? ParseCustomApiParameter(CustomAttributeData attr)
+    {
+        var args = attr.ConstructorArguments;
+        if (args.Count < 2) return null;
+
+        var param = new CustomApiParameterInfo
+        {
+            UniqueName = args[0].Value?.ToString() ?? "",
+            Type = Convert.ToInt32(args[1].Value)
+        };
+
+        foreach (var named in attr.NamedArguments)
+        {
+            switch (named.MemberName)
+            {
+                case "IsRequired":
+                    param.IsRequired = Convert.ToBoolean(named.TypedValue.Value);
+                    break;
+                case "DisplayName":
+                    param.DisplayName = named.TypedValue.Value?.ToString() ?? "";
+                    break;
+                case "Description":
+                    param.Description = named.TypedValue.Value?.ToString() ?? "";
+                    break;
+                case "LogicalEntityName":
+                    param.LogicalEntityName = named.TypedValue.Value?.ToString();
+                    break;
+            }
+        }
+
+        return param;
+    }
+
+    // ═════════════════════════════════════════════════════════════════════
+    //  Enum Mappers
+    // ═════════════════════════════════════════════════════════════════════
 
     /// <summary>Maps StageEnum values to Dataverse SdkMessageProcessingStep stage values.</summary>
     private static int MapStage(int stageEnumValue) => stageEnumValue switch

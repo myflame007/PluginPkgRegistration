@@ -28,4 +28,10 @@
     <None Include="README.md" Pack="true" PackagePath="\" />
   </ItemGroup>
 
+  <!-- Example files are for documentation only, not compiled -->
+  <ItemGroup>
+    <Compile Remove="Example.*.cs" />
+    <None Include="Example.*.cs" />
+  </ItemGroup>
+
 </Project>
