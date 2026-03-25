@@ -30,8 +30,8 @@
 
   <!-- Example files are for documentation only, not compiled -->
   <ItemGroup>
-    <Compile Remove="Example.*.cs" />
-    <None Include="Example.*.cs" />
+    <Compile Remove="Examples\*.cs" />
+    <None Include="Examples\*.cs" />
   </ItemGroup>
 
 </Project>
