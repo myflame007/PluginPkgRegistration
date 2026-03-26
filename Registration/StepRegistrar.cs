@@ -24,7 +24,7 @@ public class StepRegistrar
     /// Registers all steps for the given plugin assembly.
     /// Uses bulk-fetch + ExecuteMultipleRequest for optimal performance.
     /// </summary>
-    public void RegisterSteps(string assemblyName, List<PluginStepInfo> steps)
+    public void RegisterSteps(string assemblyName, List<PluginStepInfo> steps, string? solutionName = null)
     {
         // 1. Find plugin types that are already registered
         var pluginTypes = FindPluginTypes(assemblyName);
@@ -105,8 +105,11 @@ public class StepRegistrar
             }
             else
             {
+                var createReq = new CreateRequest { Target = entity };
+                if (!string.IsNullOrEmpty(solutionName))
+                    createReq.Parameters["SolutionUniqueName"] = solutionName;
                 batchStepMap[stepBatch.Requests.Count] = (resolvedSteps.Count, $"  CREATED step: {step.Name}", true);
-                stepBatch.Requests.Add(new CreateRequest { Target = entity });
+                stepBatch.Requests.Add(createReq);
                 resolvedSteps.Add((step, Guid.Empty)); // placeholder, filled from response
             }
         }
@@ -203,9 +206,10 @@ public class StepRegistrar
             var packages = _svc.RetrieveMultiple(packageQuery);
             packageId = packages.Entities.FirstOrDefault()?.Id;
         }
-        catch
+        catch (Exception ex) when (ex.Message.Contains("pluginpackage", StringComparison.OrdinalIgnoreCase)
+            || ex.Message.Contains("does not exist", StringComparison.OrdinalIgnoreCase))
         {
-            // PluginPackage entity might not exist in older environments
+            _log("  INFO: PluginPackage entity not available — using PluginAssembly fallback.");
         }
 
         // Query PluginType by assembly or package
@@ -302,7 +306,7 @@ public class StepRegistrar
                 "sdkmessageprocessingstepid", "name", "plugintypeid",
                 "stage", "mode", "rank", "filteringattributes",
                 "description", "configuration", "asyncautodelete",
-                "sdkmessageid", "sdkmessagefilterid")
+                "isolationmode", "sdkmessageid", "sdkmessagefilterid")
         };
         query.Criteria.AddCondition("plugintypeid", ConditionOperator.In, ids.Cast<object>().ToArray());
 
@@ -341,7 +345,7 @@ public class StepRegistrar
         return result;
     }
 
-    private static Entity BuildStepEntity(Guid pluginTypeId, Guid messageId, Guid? filterId, PluginStepInfo step)
+    internal static Entity BuildStepEntity(Guid pluginTypeId, Guid messageId, Guid? filterId, PluginStepInfo step)
     {
         var entity = new Entity("sdkmessageprocessingstep")
         {
@@ -352,6 +356,7 @@ public class StepRegistrar
             ["mode"] = new OptionSetValue(step.ExecutionMode),
             ["rank"] = step.ExecutionOrder,
             ["supporteddeployment"] = new OptionSetValue(0), // ServerOnly
+            ["isolationmode"] = new OptionSetValue(step.IsolationMode),
             ["asyncautodelete"] = step.DeleteAsyncOperation,
             ["statecode"] = new OptionSetValue(0),      // Enabled
             ["statuscode"] = new OptionSetValue(1)       // Active
@@ -425,10 +430,11 @@ public class StepRegistrar
     }
 
     /// <summary>Compares existing step attributes with desired values to detect changes.</summary>
-    private static bool StepHasChanges(Entity existing, PluginStepInfo step, Guid messageId, Guid? filterId)
+    internal static bool StepHasChanges(Entity existing, PluginStepInfo step, Guid messageId, Guid? filterId)
     {
         if (existing.GetAttributeValue<OptionSetValue>("stage")?.Value != step.Stage) return true;
         if (existing.GetAttributeValue<OptionSetValue>("mode")?.Value != step.ExecutionMode) return true;
+        if (existing.GetAttributeValue<OptionSetValue>("isolationmode")?.Value != step.IsolationMode) return true;
         if (existing.GetAttributeValue<int>("rank") != step.ExecutionOrder) return true;
         if (existing.GetAttributeValue<bool>("asyncautodelete") != step.DeleteAsyncOperation) return true;
         if ((existing.GetAttributeValue<string>("filteringattributes") ?? "") != (step.FilteringAttributes ?? "")) return true;
@@ -445,7 +451,7 @@ public class StepRegistrar
     }
 
     /// <summary>Compares existing image attributes with desired values to detect changes.</summary>
-    private static bool ImageHasChanges(Entity existing, int imageType, string? attributes)
+    internal static bool ImageHasChanges(Entity existing, int imageType, string? attributes)
     {
         if (existing.GetAttributeValue<OptionSetValue>("imagetype")?.Value != imageType) return true;
         if ((existing.GetAttributeValue<string>("attributes") ?? "") != (attributes ?? "")) return true;
@@ -453,7 +459,7 @@ public class StepRegistrar
     }
 
     /// <summary>Maps message names to their MessagePropertyName for images.</summary>
-    private static string GetMessagePropertyName(string message) => message.ToUpperInvariant() switch
+    internal static string GetMessagePropertyName(string message) => message.ToUpperInvariant() switch
     {
         "CREATE" => "Id",
         "UPDATE" => "Target",
@@ -470,7 +476,7 @@ public class StepRegistrar
     /// Validates whether an image type is supported for the given message.
     /// Create only supports PostImage, Delete only PreImage.
     /// </summary>
-    private static bool IsValidImageType(string message, int imageType) => message.ToUpperInvariant() switch
+    internal static bool IsValidImageType(string message, int imageType) => message.ToUpperInvariant() switch
     {
         // 0=PreImage, 1=PostImage, 2=Both
         "CREATE" => imageType == 1,              // Only PostImage

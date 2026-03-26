@@ -142,7 +142,7 @@ internal static class RegisterCommand
             var registrar = new StepRegistrar(client, Console.WriteLine);
             try
             {
-                registrar.RegisterSteps(assemblyName!, steps);
+                registrar.RegisterSteps(assemblyName!, steps, solutionName);
             }
             catch (Exception ex)
             {
@@ -164,7 +164,7 @@ internal static class RegisterCommand
             var apiRegistrar = new CustomApiRegistrar(client, Console.WriteLine);
             try
             {
-                apiRegistrar.RegisterCustomApis(assemblyName!, customApis);
+                apiRegistrar.RegisterCustomApis(assemblyName!, customApis, solutionName);
             }
             catch (Exception ex)
             {

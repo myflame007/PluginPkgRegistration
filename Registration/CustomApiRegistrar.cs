@@ -1,4 +1,5 @@
 using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Messages;
 using Microsoft.Xrm.Sdk.Query;
 
 namespace Dataverse.PluginRegistration;
@@ -12,6 +13,7 @@ public class CustomApiRegistrar
 {
     private readonly IOrganizationService _svc;
     private readonly Action<string> _log;
+    private string? _solutionName;
 
     public CustomApiRegistrar(IOrganizationService service, Action<string> log)
     {
@@ -22,9 +24,10 @@ public class CustomApiRegistrar
     /// <summary>
     /// Registers all Custom APIs for the given assembly.
     /// </summary>
-    public void RegisterCustomApis(string assemblyName, List<CustomApiInfo> apis)
+    public void RegisterCustomApis(string assemblyName, List<CustomApiInfo> apis, string? solutionName = null)
     {
         if (apis.Count == 0) return;
+        _solutionName = solutionName;
 
         // Find plugin types (same lookup as StepRegistrar)
         var pluginTypes = FindPluginTypes(assemblyName);
@@ -112,13 +115,16 @@ public class CustomApiRegistrar
         }
         else
         {
-            var id = _svc.Create(entity);
+            var request = new CreateRequest { Target = entity };
+            if (!string.IsNullOrEmpty(_solutionName))
+                request.Parameters["SolutionUniqueName"] = _solutionName;
+            var response = (CreateResponse)_svc.Execute(request);
             _log($"  CREATED api: {api.UniqueName}");
-            return id;
+            return response.id;
         }
     }
 
-    private static bool CustomApiHasChanges(Entity existing, CustomApiInfo api, Guid pluginTypeId)
+    internal static bool CustomApiHasChanges(Entity existing, CustomApiInfo api, Guid pluginTypeId)
     {
         var displayName = !string.IsNullOrEmpty(api.DisplayName) ? api.DisplayName : api.UniqueName;
 
@@ -251,7 +257,7 @@ public class CustomApiRegistrar
     //  Shared Helpers
     // ═══════════════════════════════════════════════════════════════
 
-    private static bool ParameterHasChanges(Entity existing, CustomApiParameterInfo param, bool isRequest)
+    internal static bool ParameterHasChanges(Entity existing, CustomApiParameterInfo param, bool isRequest)
     {
         var displayName = !string.IsNullOrEmpty(param.DisplayName) ? param.DisplayName : param.UniqueName;
 
@@ -366,9 +372,10 @@ public class CustomApiRegistrar
             var packages = _svc.RetrieveMultiple(packageQuery);
             packageId = packages.Entities.FirstOrDefault()?.Id;
         }
-        catch
+        catch (Exception ex) when (ex.Message.Contains("pluginpackage", StringComparison.OrdinalIgnoreCase)
+            || ex.Message.Contains("does not exist", StringComparison.OrdinalIgnoreCase))
         {
-            // PluginPackage entity might not exist in older environments
+            _log("  INFO: PluginPackage entity not available — using PluginAssembly fallback.");
         }
 
         // Query PluginType by assembly or package

@@ -299,7 +299,7 @@ public static class AttributeReader
     // ═════════════════════════════════════════════════════════════════════
 
     /// <summary>Maps StageEnum values to Dataverse SdkMessageProcessingStep stage values.</summary>
-    private static int MapStage(int stageEnumValue) => stageEnumValue switch
+    internal static int MapStage(int stageEnumValue) => stageEnumValue switch
     {
         // StageEnum: PreValidation=10, PreOperation=20, PostOperation=40
         // Dataverse: PreValidation=10, PreOperation=20, MainOperation=30, PostOperation=40
@@ -312,7 +312,7 @@ public static class AttributeReader
     };
 
     /// <summary>Maps ExecutionModeEnum to Dataverse values.</summary>
-    private static int MapExecMode(int enumValue) => enumValue switch
+    internal static int MapExecMode(int enumValue) => enumValue switch
     {
         // ExecutionModeEnum: Asynchronous=0, Synchronous=1
         // Dataverse: Synchronous=0, Asynchronous=1 (reversed!)
@@ -322,7 +322,7 @@ public static class AttributeReader
     };
 
     /// <summary>Maps IsolationModeEnum to Dataverse values.</summary>
-    private static int MapIsolation(int enumValue) => enumValue switch
+    internal static int MapIsolation(int enumValue) => enumValue switch
     {
         // IsolationModeEnum: None=0, Sandbox=1 -> Dataverse: None=1, Sandbox=2
         0 => 1,

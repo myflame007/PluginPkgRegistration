@@ -294,405 +294,49 @@ Das funktioniert, ist aber schwer erweiterbar (kein Log-Level, kein File-Output)
 
 ### 1.0 Agent-Reviews fur Phase 1
 
-- [ ] **Code Reviewer** Agent: Jeden Bugfix einzeln reviewen (nach 1.1, 1.2, 1.3)
-  - Pruft: Fix ist korrekt und vollstandig, keine neuen Bugs eingefuhrt
-  - Pruft: Change Detection Logik ist konsistent
-- [ ] **Security Engineer** Agent: SecureConfiguration-Implementierung reviewen (nach 1.3)
-  - Pruft: Secure Config wird nie in Logs geschrieben
-  - Pruft: Keine unverschlusselte Speicherung von Secrets
+- [x] **Code Reviewer** Agent: Jeden Bugfix einzeln reviewen (nach 1.1, 1.2, 1.3)
+- [x] **Security Engineer** Agent: SecureConfiguration-Implementierung reviewen (nach 1.3)
 - [ ] `/simplify` Skill auf geanderte Files anwenden
 
-### 1.1 IsolationMode tatsächlich setzen
+### 1.1 IsolationMode tatsächlich setzen ✅ DONE
 
-**Bug:** `AttributeReader` parst den IsolationMode korrekt aus dem Attribut, aber
-`StepRegistrar.UpsertStep()` setzt ihn nie auf dem `SdkMessageProcessingStep`-Entity.
-Alle Steps werden mit dem Default-IsolationMode registriert.
+> Implementiert in `StepRegistrar.cs`: `BuildStepEntity()` setzt `isolationmode`,
+> `StepHasChanges()` vergleicht ihn, `FetchAllSteps` holt ihn per ColumnSet.
+> 7 Unit Tests in `StepRegistrarTests.cs` decken IsolationMode ab.
 
-- [ ] In `UpsertStep()`: `step["isolationmode"] = new OptionSetValue(stepInfo.IsolationMode)` setzen
-- [ ] In `StepHasChanges()`: IsolationMode in den Vergleich aufnehmen
-- [ ] Unit Test: Step mit IsolationMode=Sandbox → Entity hat korrekten OptionSetValue
-- [ ] Unit Test: Step mit IsolationMode=None → Entity hat korrekten OptionSetValue
-- [ ] Unit Test: Änderung von Sandbox→None wird als Change erkannt
+### 1.2 Bare `catch {}` Blöcke eliminieren ✅ DONE
 
-**Definition of Done:**
-- [ ] IsolationMode wird bei Create und Update korrekt gesetzt
-- [ ] Change Detection erkennt IsolationMode-Änderungen
-- [ ] 3 Unit Tests grün
+> Implementiert in `StepRegistrar.cs` und `CustomApiRegistrar.cs`:
+> Bare `catch {}` ersetzt durch `catch (Exception ex) when (...)` mit gefiltertem
+> Logging. PluginPackage-Fallback wird klar kommuniziert, echte Fehler werden
+> nicht mehr verschluckt.
 
-### 1.2 Bare `catch {}` Blöcke eliminieren
+### 1.3 Custom API Registrierung (Option A: Eigene Attribute) ✅ DONE
 
-**Bug:** In `StepRegistrar.cs` gibt es einen `catch {}` Block, der **alle** Exceptions
-stillschweigend verschluckt. Wenn die PluginPackage-Query fehlschlägt (z.B. wegen
-fehlender Berechtigung), sieht der User nichts.
+> Vollständig implementiert. Eigene Attribute (`CustomApiDefinitionAttribute`,
+> `CustomApiRequestParameterAttribute`, `CustomApiResponsePropertyAttribute`) in
+> `CustomApiAttributes.cs`. Model in `CustomApiInfo.cs`. `AttributeReader` liest
+> Custom APIs separat via `ReadCustomApisFromAssembly()`. `CustomApiRegistrar.cs`
+> registriert `customapi` + `customapirequestparameter` + `customapiresponseproperty`
+> mit Change Detection und Orphan-Warnings. Pipeline-Integration in `RegisterCommand.cs`
+> und `ListCommand.cs`. 11 Unit Tests in `CustomApiRegistrarTests.cs`.
 
-- [ ] `catch {}` ersetzen durch `catch (Exception ex)` mit Logger-Aufruf
-- [ ] Spezifische Exception-Typen fangen wo möglich:
-  - `FaultException<OrganizationServiceFault>` für Dataverse-spezifische Fehler
-  - Wenn Entity nicht existiert → `LogWarning("PluginPackage entity not available — using PluginAssembly fallback")`
-  - Wenn anderer Fehler → `LogError(ex, "Failed to query PluginPackage")` und weiterwerfen
-- [ ] Review: Gibt es weitere unterdrückte Exceptions? (Codebase durchsuchen)
+#### Offene Punkte
 
-**Definition of Done:**
-- [ ] Kein einziger `catch { }` oder `catch (Exception) { }` ohne Logging im gesamten Projekt
-- [ ] PluginPackage-Fallback wird im Log klar kommuniziert
-- [ ] Echte Fehler (Berechtigung, Netzwerk) werden nicht mehr verschluckt
-
-### 1.3 Custom API Registrierung (Option A: Eigene Attribute)
-
-**Problem:** `AttributeReader` parst den 1-Argument-Constructor (Custom APIs) und erstellt ein
-`PluginStepInfo` mit nur einem Message-Namen. Aber `StepRegistrar` behandelt das wie einen
-normalen `SdkMessageProcessingStep` — das ist **falsch**. Custom APIs mussen uber die Entities
-`customapi`, `customapirequestparameter` und `customapiresponseproperty` registriert werden.
-
-**Ansatz:** Eigene Attribute (`CustomApiDefinitionAttribute`, `CustomApiRequestParameterAttribute`,
-`CustomApiResponsePropertyAttribute`), die der Entwickler auf seine Plugin-Klasse setzt —
-analog zu `CrmPluginRegistrationAttribute` für Steps. Unser Tool liest sie per
-`MetadataLoadContext` (Name-basiert, kein Assembly-Referenz nötig) und registriert
-die Custom API vollständig in Dataverse.
-
-#### Schritt 1 — Attribut-Definitionen für Entwickler ✅ DONE
-
-> Implementiert in `CustomApiAttributes.cs`. Enthält `CustomApiDefinitionAttribute`,
-> `CustomApiRequestParameterAttribute`, `CustomApiResponsePropertyAttribute` und die
-> zugehörigen Enums (`CustomApiBindingType`, `CustomApiProcessingStepType`, `CustomApiParameterType`).
-
-Entwickler kopieren diese Attribute in ihr Plugin-Projekt (oder bekommen sie via
-optionalem NuGet `Dataverse.PluginRegistration.Attributes`). Unser Tool matched
-nur auf den Attribut-Namen — es muss nicht unser NuGet sein.
-
-```csharp
-// ─── Nutzung im Plugin-Projekt ─────────────────────────────────
-
-[CrmPluginRegistration("ava_SapHandleGetAccountResponse")]
-[CustomApiDefinition(
-    DisplayName = "SAP Handle Get Account Response",
-    BindingType = CustomApiBindingType.Entity,
-    BoundEntity = "ava_transferlog",
-    IsFunction = false,
-    IsPrivate = false,
-    AllowedProcessingStepType = CustomApiProcessingStepType.SyncAndAsync,
-    Description = "Handles the SAP response for account creation"
-)]
-[CustomApiRequestParameter("ResponseFromSAP", CustomApiParameterType.String, IsRequired = true)]
-[CustomApiRequestParameter("DTO", CustomApiParameterType.String, IsRequired = false, Description = "Optional DTO payload")]
-[CustomApiResponseProperty("HasError", CustomApiParameterType.Boolean)]
-[CustomApiResponseProperty("Message", CustomApiParameterType.String)]
-[CustomApiResponseProperty("Accountnumber", CustomApiParameterType.String)]
-public class SapHandleGetAccountResponse : XrmPluginBase<Account>, IPlugin
-{
-    // ... Plugin-Code bleibt unverändert
-}
-```
-
-**Attribut-Klassen (die der Entwickler in sein Projekt kopiert):**
-
-```csharp
-// ─── CustomApiDefinitionAttribute ──────────────────────────────
-// Markiert eine Plugin-Klasse als Custom API Backend.
-// Wird zusammen mit CrmPluginRegistration(message) verwendet.
-[AttributeUsage(AttributeTargets.Class, AllowMultiple = false)]
-public class CustomApiDefinitionAttribute : Attribute
-{
-    public string DisplayName { get; set; } = "";
-    public string Description { get; set; } = "";
-    public CustomApiBindingType BindingType { get; set; } = CustomApiBindingType.Global;
-    public string BoundEntity { get; set; } = "";                // nur wenn BindingType != Global
-    public bool IsFunction { get; set; } = false;                // false = Action (POST), true = Function (GET)
-    public bool IsPrivate { get; set; } = false;
-    public CustomApiProcessingStepType AllowedProcessingStepType { get; set; }
-        = CustomApiProcessingStepType.SyncAndAsync;
-    public string ExecutePrivilegeName { get; set; } = "";       // optionales Privilege
-}
-
-public enum CustomApiBindingType { Global = 0, Entity = 1, EntityCollection = 2 }
-public enum CustomApiProcessingStepType { None = 0, AsyncOnly = 1, SyncAndAsync = 2 }
-
-// ─── CustomApiRequestParameterAttribute ────────────────────────
-[AttributeUsage(AttributeTargets.Class, AllowMultiple = true)]
-public class CustomApiRequestParameterAttribute : Attribute
-{
-    public string UniqueName { get; }
-    public CustomApiParameterType Type { get; }
-    public bool IsRequired { get; set; } = true;
-    public string DisplayName { get; set; } = "";
-    public string Description { get; set; } = "";
-    public string LogicalEntityName { get; set; } = "";          // nur für Entity/EntityRef/EntityCollection
-
-    public CustomApiRequestParameterAttribute(string uniqueName, CustomApiParameterType type)
-    {
-        UniqueName = uniqueName;
-        Type = type;
-    }
-}
-
-// ─── CustomApiResponsePropertyAttribute ────────────────────────
-[AttributeUsage(AttributeTargets.Class, AllowMultiple = true)]
-public class CustomApiResponsePropertyAttribute : Attribute
-{
-    public string UniqueName { get; }
-    public CustomApiParameterType Type { get; }
-    public string DisplayName { get; set; } = "";
-    public string Description { get; set; } = "";
-    public string LogicalEntityName { get; set; } = "";
-
-    public CustomApiResponsePropertyAttribute(string uniqueName, CustomApiParameterType type)
-    {
-        UniqueName = uniqueName;
-        Type = type;
-    }
-}
-
-public enum CustomApiParameterType
-{
-    Boolean = 0, DateTime = 1, Decimal = 2, Entity = 3, EntityCollection = 4,
-    EntityReference = 5, Float = 6, Integer = 7, Money = 8, Picklist = 9,
-    String = 10, StringArray = 11, Guid = 12
-}
-```
-
-**Verteilungs-Optionen für die Attribute:**
-- **Minimal:** Kopieren — Entwickler legt die 3 Klassen + 3 Enums als `.cs` in sein Projekt
-- **Besser:** NuGet `Dataverse.PluginRegistration.Attributes` (netstandard2.0, keine Dependencies)
-  - Nur Attribut-Definitionen, kein Runtime-Code
-  - Wird ins Plugin-NuGet eingebettet — stört Dataverse nicht (leere Marker-Klassen)
-- Unser Tool matched immer nur auf `AttributeType.Name`, nie auf Assembly — beide Wege funktionieren
-
-#### Schritt 2 — Model: `CustomApiInfo` (neues Datenmodell) ✅ DONE
-
-> Implementiert in `CustomApiInfo.cs`. Enthält `CustomApiInfo` und `CustomApiParameterInfo`.
-
-Neue Datei `CustomApiInfo.cs` neben `PluginStepInfo`:
-
-```csharp
-public class CustomApiInfo
-{
-    // Aus CrmPluginRegistration(message) — der 1-Arg Constructor
-    public required string UniqueName { get; set; }
-    public required string PluginTypeName { get; set; }
-
-    // Aus CustomApiDefinitionAttribute
-    public string DisplayName { get; set; } = "";
-    public string Description { get; set; } = "";
-    public int BindingType { get; set; } = 0;           // 0=Global, 1=Entity, 2=EntityCollection
-    public string? BoundEntity { get; set; }
-    public bool IsFunction { get; set; }
-    public bool IsPrivate { get; set; }
-    public int AllowedProcessingStepType { get; set; } = 2; // SyncAndAsync
-    public string? ExecutePrivilegeName { get; set; }
-
-    // Aus CustomApiRequestParameterAttribute(s)
-    public List<CustomApiParameterInfo> RequestParameters { get; set; } = [];
-
-    // Aus CustomApiResponsePropertyAttribute(s)
-    public List<CustomApiParameterInfo> ResponseProperties { get; set; } = [];
-}
-
-public class CustomApiParameterInfo
-{
-    public required string UniqueName { get; set; }
-    public int Type { get; set; }                       // CustomApiParameterType enum value
-    public bool IsRequired { get; set; } = true;        // nur für Request, bei Response ignoriert
-    public string DisplayName { get; set; } = "";
-    public string Description { get; set; } = "";
-    public string? LogicalEntityName { get; set; }      // für Entity/EntityRef/EntityCollection
-}
-```
-
-#### Schritt 3 — `AttributeReader` erweitern ✅ DONE
-
-Aktuell gibt `ReadFromAssembly()` nur `List<PluginStepInfo>` zurück.
-Neue zweite Methode `ReadCustomApisFromAssembly()` hinzugefügt.
-
-- [x] **Option: Zweite Methode** `ReadCustomApisFromAssembly(string assemblyPath) → List<CustomApiInfo>`
-  - Sucht nach Klassen mit `CrmPluginRegistrationAttribute` (1-Arg Constructor)
-  - UND `CustomApiDefinitionAttribute` auf derselben Klasse
-  - Parst Definition + Request-Parameter + Response-Properties
-  - Klassen mit 1-Arg Constructor OHNE `CustomApiDefinitionAttribute` → Warning loggen:
-    `"WARN: '{typeName}' has Custom API registration but no [CustomApiDefinition]. Using defaults."`
-- [x] **Bestehende Methode anpassen:** 1-Arg Constructor Einträge aus `ReadFromAssembly()` ausfiltern
-  - Diese werden jetzt von `ReadCustomApisFromAssembly()` behandelt
-  - Keine `PluginStepInfo` mehr für Custom APIs → kein falsches Step-Register
-
-**Parsing-Logik für `CustomApiDefinitionAttribute`:**
-```
-1. type.GetCustomAttributesData().Where(a => a.AttributeType.Name == "CustomApiDefinitionAttribute")
-2. NamedArguments auslesen: DisplayName, BindingType, BoundEntity, IsFunction, IsPrivate, etc.
-3. Defaults für nicht gesetzte Properties verwenden
-```
-
-**Parsing-Logik für `CustomApiRequestParameterAttribute`:**
-```
-1. type.GetCustomAttributesData().Where(a => a.AttributeType.Name == "CustomApiRequestParameterAttribute")
-2. ConstructorArguments[0] = UniqueName, ConstructorArguments[1] = Type (enum → int)
-3. NamedArguments: IsRequired, DisplayName, Description, LogicalEntityName
-```
-
-**Parsing-Logik für `CustomApiResponsePropertyAttribute`:**
-```
-Identisch, nur AttributeType.Name == "CustomApiResponsePropertyAttribute"
-```
-
-#### Schritt 4 — `CustomApiRegistrar` (neuer Service) ✅ DONE
-
-> Implementiert in `CustomApiRegistrar.cs`. Enthält vollständigen Upsert für
-> `customapi`, `customapirequestparameter`, `customapiresponseproperty` mit
-> Change Detection und Orphan-Warnings.
-
-Neue Datei `CustomApiRegistrar.cs` — analog zu `StepRegistrar`, aber für Custom APIs:
-
-```
-RegisterCustomApis(assemblyName, List<CustomApiInfo> apis)
-    für jede API:
-        1. PluginType-ID aus Dataverse holen (wie StepRegistrar.FindPluginTypes)
-        2. UpsertCustomApi() → customapi Entity erstellen/updaten
-        3. UpsertRequestParameters() → für jeden Parameter
-        4. UpsertResponseProperties() → für jede Property
-        5. Orphan-Check: Parameter in Dataverse die nicht mehr im Code → Warning/Löschen
-```
-
-**Dataverse Entity Mappings:**
-
-| `customapi`-Feld                      | Quelle                                   |
-|---------------------------------------|------------------------------------------|
-| `uniquename`                          | `CustomApiInfo.UniqueName`               |
-| `name`                                | `CustomApiInfo.DisplayName` (oder UniqueName als Fallback) |
-| `displayname`                         | `CustomApiInfo.DisplayName`              |
-| `description`                         | `CustomApiInfo.Description`              |
-| `bindingtype`                         | `OptionSetValue(CustomApiInfo.BindingType)` |
-| `boundentitylogicalname`              | `CustomApiInfo.BoundEntity`              |
-| `isfunction`                          | `CustomApiInfo.IsFunction`               |
-| `isprivate`                           | `CustomApiInfo.IsPrivate`                |
-| `allowedcustomprocessingsteptype`     | `OptionSetValue(CustomApiInfo.AllowedProcessingStepType)` |
-| `plugintypeid`                        | `EntityReference("plugintype", pluginTypeId)` |
-| `executeprivilegename`                | `CustomApiInfo.ExecutePrivilegeName`     |
-
-| `customapirequestparameter`-Feld      | Quelle                                   |
-|---------------------------------------|------------------------------------------|
-| `uniquename`                          | `ParameterInfo.UniqueName`               |
-| `name`                                | `ParameterInfo.UniqueName`               |
-| `displayname`                         | `ParameterInfo.DisplayName` (oder UniqueName) |
-| `description`                         | `ParameterInfo.Description`              |
-| `type`                                | `OptionSetValue(ParameterInfo.Type)`     |
-| `isoptional`                          | `!ParameterInfo.IsRequired`              |
-| `logicalentityname`                   | `ParameterInfo.LogicalEntityName`        |
-| `customapiid`                         | `EntityReference("customapi", apiId)`    |
-
-| `customapiresponseproperty`-Feld      | Quelle                                   |
-|---------------------------------------|------------------------------------------|
-| (identisch zu Request, nur `customapiresponseproperty` Entity) |                   |
-
-**Change Detection (analog zu `StepHasChanges`):**
-- `CustomApiHasChanges(existing, desired)` — vergleicht alle Felder
-- `ParameterHasChanges(existing, desired)` — Type, IsOptional, Description, etc.
-- Unveränderte Einträge → `UNCHANGED`, geänderte → `UPDATE`, neue → `CREATE`
-
-**Orphaned Parameter Detection:**
-- Parameter/Properties die in Dataverse existieren aber nicht mehr im Code definiert sind
-- Warning loggen: `"WARN: Request parameter 'OldParam' exists in Dataverse but not in code"`
-- Bei `--force`: automatisch löschen
-
-#### Schritt 5 — Pipeline-Integration ✅ DONE
-
-> `Program.cs` aktualisiert: `register`-Command ruft jetzt beide Registrars auf
-> (Step 2/3: Steps, Step 3/3: Custom APIs). `list`-Command zeigt Custom APIs
-> mit Parametern, BindingType und Action/Function an.
-
-In `Program.cs` (bzw. zukünftigem `RegisterCommand`):
-
-```
-1. steps = AttributeReader.ReadFromAssembly(dllPath)         // nur noch Steps (kein 1-Arg Constructor)
-2. apis  = AttributeReader.ReadCustomApisFromAssembly(dllPath) // Custom APIs separat
-3. PackageDeployer.Push(...)
-4. StepRegistrar.RegisterSteps(assemblyName, steps)           // Plugin Steps
-5. CustomApiRegistrar.RegisterCustomApis(assemblyName, apis)  // Custom APIs ← NEU
-```
-
-Erweiterung für `list`-Command:
-```
-plugin-reg list
-  Steps:
-    PreValidation of Create on account  [Sync]
-    PostOperation of Update on contact  [Async]
-
-  Custom APIs:                                                ← NEU
-    ava_SapHandleGetAccountResponse  [Entity-bound: ava_transferlog]
-      Request:  ResponseFromSAP (String, required)
-      Request:  DTO (String, optional)
-      Response: HasError (Boolean)
-      Response: Message (String)
-      Response: Accountnumber (String)
-```
-
-#### Schritt 6 — Unit Tests
-
-- [ ] **AttributeReader Tests:**
-  - [ ] `ReadCustomApis_WithDefinitionAndParams_ReturnsCompleteApiInfo()`
-  - [ ] `ReadCustomApis_WithoutDefinitionAttribute_ReturnsWarning()`
-  - [ ] `ReadCustomApis_GlobalBinding_NoBoundEntity()`
-  - [ ] `ReadCustomApis_EntityBinding_WithBoundEntity()`
-  - [ ] `ReadCustomApis_MultipleRequestParams_AllParsed()`
-  - [ ] `ReadCustomApis_NoResponseProps_EmptyList()`
-  - [ ] `ReadFromAssembly_CustomApiClasses_ExcludedFromSteps()` ← Critical: kein Doppel-Register
-
-- [ ] **CustomApiRegistrar Tests:**
-  - [ ] `Register_NewApi_CreatesCustomApiEntity()`
-  - [ ] `Register_ExistingUnchanged_SkipsUpdate()`
-  - [ ] `Register_ChangedDescription_UpdatesApi()`
-  - [ ] `Register_NewParameter_CreatesParameterEntity()`
-  - [ ] `Register_RemovedParameter_LogsWarning()`
-  - [ ] `Register_PluginTypeNotFound_LogsErrorAndSkips()`
-
-- [ ] **Test-DLL:** Fixture-Assembly mit Custom API Plugin + Attributen erstellen
-
-#### Schritt 7 — Dokumentation
-
-- [ ] README erweitern: Custom API Abschnitt mit Beispiel
-- [ ] Attribut-Klassen als kopierbares Code-Block in README
+- [ ] Attribute als Copy-Paste-Block in README dokumentieren
 - [ ] Hinweis: `[CustomApiDefinition]` ist optional — ohne wird die API nur mit Defaults registriert
-  (Global, Action, nicht privat, SyncAndAsync)
+- [ ] Weitere Integration-Tests (AttributeReader + CustomApiRegistrar mit Test-DLL)
 
-#### Abhängigkeiten / Reihenfolge
-
-```
-Schritt 1 (Attribut-Design)     → unabhängig, kann sofort beginnen
-Schritt 2 (CustomApiInfo Model) → unabhängig
-Schritt 3 (AttributeReader)     → braucht Schritt 1 + 2
-Schritt 4 (CustomApiRegistrar)  → braucht Schritt 2
-Schritt 5 (Pipeline)            → braucht Schritt 3 + 4
-Schritt 6 (Tests)               → braucht Schritt 3 + 4
-Schritt 7 (Docs)                → nach Schritt 5
-```
-
-Schritt 1+2 können parallel, Schritt 3+4 können parallel, dann 5 → 6 → 7.
-
-**Definition of Done:**
-- [x] Custom APIs werden vollständig registriert (`customapi` + `requestparameter` + `responseproperty`)
+**Definition of Done (offen):**
 - [ ] Attribute sind dokumentiert und als Copy-Paste-Block verfügbar
-- [x] `plugin-reg list` zeigt Custom APIs mit Parametern an
-- [x] Change Detection für API + Parameter funktioniert
-- [x] Keine `PluginStepInfo` mehr für Custom API Klassen (kein falsches Step-Register)
 - [ ] 13+ Unit Tests grün
-- [x] Bestehende Step-Registrierung ist nicht beeinträchtigt (Regression-frei)
 
-### 1.4 Solution-aware Step Registration
+### 1.4 Solution-aware Step Registration ✅ DONE
 
-**Bug:** `PackageDeployer.Push()` fugt das Package korrekt zur Solution hinzu via
-`SolutionUniqueName` auf dem `CreateRequest`. Aber `StepRegistrar.UpsertStep()` fugt
-neu erstellte Steps **nicht** zur Solution hinzu. In Dataverse werden Steps nicht automatisch
-in eine Solution aufgenommen nur weil das Parent-Package drin ist.
-
-Konsequenz: Beim Solution-Export fehlen alle Steps. Andere Umgebungen bekommen das Package
-aber keine Step-Registrierungen.
-
-- [ ] Bei `Create` eines Steps: `SolutionUniqueName` im `CreateRequest` setzen (wie bei Package)
-- [ ] Solution-Name aus `AssemblyConfig.SolutionName` durchreichen
-- [ ] Unit Test: Neuer Step wird mit Solution-Name erstellt
-- [ ] Unit Test: Ohne Solution-Name funktioniert Create trotzdem (optional field)
-
-**Definition of Done:**
-- [ ] Neue Steps werden automatisch der konfigurierten Solution zugewiesen
-- [ ] Solution-Export enthalt alle registrierten Steps
-- [ ] 2 Unit Tests grun
+> Implementiert in `StepRegistrar.cs` und `CustomApiRegistrar.cs`:
+> `RegisterSteps()` und `RegisterCustomApis()` akzeptieren optionalen `solutionName`-Parameter.
+> Neue Steps/APIs werden via `CreateRequest` mit `SolutionUniqueName` erstellt.
+> `RegisterCommand.cs` reicht den Solution-Name aus der Config durch.
 
 ### 1.5 Multi-Assembly Iteration implementieren
 

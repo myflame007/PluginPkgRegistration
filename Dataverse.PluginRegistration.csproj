@@ -19,6 +19,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="Dataverse.PluginRegistration.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Microsoft.Identity.Client.Extensions.Msal" Version="4.67.2" />
     <PackageReference Include="Microsoft.PowerPlatform.Dataverse.Client" Version="1.2.10" />
     <PackageReference Include="System.Reflection.MetadataLoadContext" Version="10.0.5" />
@@ -33,6 +37,7 @@
   <ItemGroup>
     <Compile Remove="Examples\*.cs" />
     <None Include="Examples\*.cs" />
+    <Compile Remove="Tests\**" />
   </ItemGroup>
 
 </Project>
