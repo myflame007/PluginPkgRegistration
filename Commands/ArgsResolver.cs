@@ -65,6 +65,17 @@ internal static class ArgsResolver
             else if (!string.IsNullOrEmpty(envArg) && config?.Environments.TryGetValue(envArg, out var ec) == true)
             {
                 EnvFile.ResolveConfig(ec, envVars);
+
+                // Validate that all placeholders were resolved
+                if (ec.Url.Contains("${"))
+                    return (null, null, null, null, null, null, null,
+                        $"ERROR: Unresolved placeholder in url: '{ec.Url}'.\n" +
+                        $"  Create a .env file in the project directory or set the environment variable.");
+                if (ec.AppId?.Contains("${") == true)
+                    return (null, null, null, null, null, null, null,
+                        $"ERROR: Unresolved placeholder in appId: '{ec.AppId}'.\n" +
+                        $"  Create a .env file in the project directory or set the environment variable.");
+
                 envConfig = ec;
                 connectionString = ec.BuildConnectionString();
                 Console.WriteLine($"Using environment: {envArg} ({ec.Url})");
