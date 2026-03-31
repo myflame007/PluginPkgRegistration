@@ -17,9 +17,16 @@ dotnet tool install --global --add-source ./nupkg Dataverse.PluginRegistration
 ## Quick Start
 
 ```bash
-# In your plugin project directory:
-plugin-reg init                  # Creates pluginreg.json + .env template
-plugin-reg list                  # Dry-run: shows discovered steps
+# 1. In your plugin project directory (or repo root):
+plugin-reg init                  # Creates pluginreg.json + scaffolds Attributes/
+
+# 2. Create a .env file next to pluginreg.json (never commit this):
+#    DATAVERSE_DEV_URL=https://yourorg.crm4.dynamics.com
+#    DATAVERSE_APPID=51f81489-12ee-4a9e-aaae-a2591f45987d
+#    DATAVERSE_REDIRECT_URI=http://localhost
+
+# 3. Build your project (Debug configuration), then:
+plugin-reg list                  # Dry-run: shows discovered steps (no connection needed)
 plugin-reg register --env dev    # Deploy package + register steps
 ```
 
@@ -35,12 +42,18 @@ plugin-reg register --env dev    # Deploy package + register steps
 
 ### pluginreg.json
 
+Commit this file to git. Use `${VAR}` placeholders for environment-specific values.
+
+`plugin-reg init` auto-detects the project type and generates the correct DLL path:
+- **Classic `.csproj`** (e.g. Dynamics/CRM projects): `bin\Debug\MyPlugin.dll`
+- **SDK-style `.csproj`** (e.g. .NET 6+): `bin\Debug\net8.0\MyPlugin.dll`
+
 ```json
 {
   "assemblies": [
     {
       "name": "MyPlugin",
-      "path": "bin\\Debug\\net462\\MyPlugin.dll",
+      "path": "bin\\Debug\\MyPlugin.dll",
       "nupkgPath": "bin\\Debug\\MyPlugin.1.0.0.nupkg",
       "publisherPrefix": "pub",
       "solutionName": "MySolution_unmanaged"
@@ -60,12 +73,21 @@ plugin-reg register --env dev    # Deploy package + register steps
 
 ### .env
 
+**Never commit this file** — add `.env` to your `.gitignore`. Each developer creates their own copy locally.
+
 ```env
-DATAVERSE_APPID=51f81489-12ee-4a9e-aaae-a2591f45987d
-DATAVERSE_REDIRECT_URI=http://localhost
 DATAVERSE_DEV_URL=https://myorg-dev.crm4.dynamics.com
 DATAVERSE_LIVE_URL=https://myorg.crm4.dynamics.com
+DATAVERSE_REDIRECT_URI=http://localhost
+
+# AppId — use the Microsoft XRM Tooling app for local development (no own App Registration needed):
+DATAVERSE_APPID=51f81489-12ee-4a9e-aaae-a2591f45987d
 ```
+
+> **AppId note:** `51f81489-12ee-4a9e-aaae-a2591f45987d` is Microsoft's official "XRM Tooling" app,
+> the same one used by PAC CLI, XrmToolBox, and spkl. It has Dataverse permissions pre-configured
+> and works for interactive (browser) login out of the box — no Azure AD App Registration required.
+> For CI/CD or service accounts, use a dedicated App Registration with a client secret instead.
 
 ## What it does
 
